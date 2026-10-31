@@ -6,7 +6,7 @@ const STORE_KEY = 'kitchenplanner.v1';
 let state = loadState();
 let foods = [];
 let monitor = { stats: {}, shortages: [], suggestions: [], next: null };
-const ui = { tab: 'today', day: L.startOfDay(Date.now()), pantrySearch: '', newItem: '' };
+const ui = { tab: 'today', day: L.startOfDay(Date.now()), pantrySearch: '', newItem: '', clipboard: loadClipboard() };
 let sheet = null; // { pages: [...] }
 
 function loadState() {
@@ -15,6 +15,25 @@ function loadState() {
     if (raw) return { ...L.emptyState(), ...JSON.parse(raw) };
   } catch { /* leerer Start */ }
   return L.emptyState();
+}
+
+// Kopierte Mahlzeit – eigener Schlüssel, damit sie einen Neustart der Home-Bildschirm-App übersteht.
+const CLIP_KEY = 'kitchenplanner.clipboard';
+function loadClipboard() {
+  try { return JSON.parse(localStorage.getItem(CLIP_KEY)) || null; } catch { return null; }
+}
+function setClipboard(clip) {
+  ui.clipboard = clip;
+  try { clip ? localStorage.setItem(CLIP_KEY, JSON.stringify(clip)) : localStorage.removeItem(CLIP_KEY); } catch { /* nur im Speicher */ }
+}
+
+function applyTheme() {
+  const theme = state.settings.theme || 'system';
+  const root = document.documentElement;
+  if (theme === 'system') delete root.dataset.theme;
+  else root.dataset.theme = theme;
+  const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => { m.content = dark ? '#000000' : '#f2f2f7'; });
 }
 
 function save() {
@@ -116,6 +135,9 @@ const I = {
   arrowDown: '<circle cx="12" cy="12" r="9"/><path d="M12 7v9M8.5 12.5L12 16l3.5-3.5"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   trash: '<path d="M5 7h14M10 7V5h4v2M7 7l1 13h8l1-13"/>',
+  copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/>',
+  paste: '<rect x="5" y="4.5" width="14" height="16" rx="2.5"/><path d="M9 4.5h6v3H9zM12 11v6M9 14l3 3 3-3"/>',
+  minus: '<path d="M6 12h12"/>',
 };
 const icon = (name, size = 22, width = 2) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[name]}</svg>`;
@@ -169,13 +191,14 @@ function renderToday() {
       `<div class="pill"><button data-action="add" data-intent="log" data-scan="1" aria-label="Scannen">${icon('barcode')}</button>
         <button data-action="add" data-intent="log" aria-label="Hinzufügen">${icon('plus')}</button></div>`)}
     <h1 class="large-title">${esc(title)}</h1>
-    ${banner}
+    ${banner}${clipboardBar()}
     <div class="section"><div class="card macro-card">${macroRing(consumed, g)}</div></div>
     ${L.MEALS.map((meal) => {
       const list = entries.filter((e) => e.meal === meal.id);
       const kcal = list.reduce((s, e) => s + e.kcal, 0);
       return `<div class="section">
-        <div class="section-header"><span>${meal.title}</span>${kcal > 0 ? `<span>${Math.round(kcal)} kcal</span>` : ''}</div>
+        <div class="section-header"><span>${meal.title}</span><span class="header-trail">${kcal > 0 ? `${Math.round(kcal)} kcal` : ''}
+          ${list.length ? `<button class="header-button" data-action="copyMeal" data-meal="${meal.id}" aria-label="${meal.title} kopieren">${icon('copy', 18, 1.8)}</button>` : ''}</span></div>
         <div class="card">
           ${list.map((e) => {
             const p = L.findProduct(state, e.productId);
@@ -190,8 +213,23 @@ function renderToday() {
           <button class="row icon-row" data-action="add" data-intent="log" data-meal="${meal.id}">
             <span class="row-icon">${icon('plusCircle', 24, 1.7)}</span><span class="accent">Hinzufügen</span>
           </button>
+          ${ui.clipboard ? `<button class="row icon-row" data-action="pasteMeal" data-meal="${meal.id}">
+            <span class="row-icon">${icon('paste', 24, 1.7)}</span><span class="accent grow">${esc(mealTitle(ui.clipboard.meal))} einfügen</span>
+            <span class="trail-small">${ui.clipboard.items.length} ${ui.clipboard.items.length === 1 ? 'Eintrag' : 'Einträge'}</span>
+          </button>` : ''}
         </div></div>`;
     }).join('')}`;
+}
+
+function clipboardBar() {
+  const c = ui.clipboard;
+  if (!c) return '';
+  const from = c.day === L.startOfDay(Date.now()) ? 'heute'
+    : 'vom ' + new Date(c.day).toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' });
+  return `<div class="banner clip-bar"><span class="icon accent">${icon('copy', 22, 1.8)}</span>
+    <span class="grow"><b>${esc(mealTitle(c.meal))} ${from} kopiert</b>
+    <div class="secondary" style="font-size:13px;margin-top:2px">Tag wählen und bei einer Mahlzeit „Einfügen“ tippen</div></span>
+    <button class="pill pill-text" data-action="clearClipboard">Fertig</button></div>`;
 }
 
 function macroRing(c, g) {
@@ -303,13 +341,18 @@ function renderShopping() {
 
 function shoppingRow(item) {
   const label = { suggestion: 'Vorschlag', shortage: 'Engpass' }[item.source];
+  const counter = L.shoppingCounter(state, item);
+  const sub = [counter.label, label, item.note].filter(Boolean).join(' · ');
   return `<div class="row icon-row">
     <button class="check ${item.checked ? 'on' : ''}" data-action="toggleItem" data-id="${item.id}" aria-label="Abhaken">${icon(item.checked ? 'checkCircle' : 'circle', 26, 1.6)}</button>
     <button class="grow" style="text-align:left" data-action="toggleItem" data-id="${item.id}">
       <div class="${item.checked ? 'strike' : ''}">${esc(item.name)}</div>
-      ${item.note ? `<div class="sub">${esc(item.note)}</div>` : ''}</button>
-    ${label ? `<span class="badge gray">${label}</span>` : ''}
-    <span class="trail">${item.quantity > 0 ? `${L.formatNumber(item.quantity)} ${item.unit === 'piece' ? 'Stück' : 'g'}` : ''}</span>
+      <div class="sub">${esc(sub)}</div></button>
+    <div class="stepper">
+      <button data-action="stepItem" data-id="${item.id}" data-delta="-1" aria-label="Weniger">${icon('minus', 16, 2.2)}</button>
+      <input inputmode="decimal" value="${numValue(L.shoppingCount(state, item))}" data-input="shopCount" data-id="${item.id}" aria-label="Anzahl ${esc(item.name)}">
+      <button data-action="stepItem" data-id="${item.id}" data-delta="1" aria-label="Mehr">${icon('plus', 16, 2.2)}</button>
+    </div>
     <button class="secondary" data-action="deleteItem" data-id="${item.id}" aria-label="Löschen">${icon('trash', 18, 1.7)}</button>
   </div>`;
 }
@@ -321,7 +364,11 @@ function renderSettings() {
   const goalRow = (key, label) => `<label class="row"><span class="grow">${label}</span>
     <input class="num-field" inputmode="decimal" value="${numValue(g[key])}" data-input="goal" data-key="${key}"></label>`;
   const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  const theme = state.settings.theme || 'system';
   return `<div class="topbar"></div><h1 class="large-title">Einstellungen</h1>
+    <div class="section"><div class="section-header">Darstellung</div><div class="card" style="padding:12px 16px">
+      <div class="segmented">${[['system', 'System'], ['light', 'Hell'], ['dark', 'Dunkel']].map(([id, t]) => `<button class="${theme === id ? 'on' : ''}" data-action="setTheme" data-id="${id}">${t}</button>`).join('')}</div>
+    </div><div class="section-footer">„System“ folgt der Einstellung deines iPhones.</div></div>
     <div class="section"><div class="section-header">Tagesziele</div><div class="card">
       ${goalRow('kcal', 'Kalorien (kcal)')}${goalRow('carbs', 'Kohlenhydrate (g)')}${goalRow('fat', 'Fett (g)')}${goalRow('protein', 'Protein (g)')}
       <button class="row accent" data-action="kcalFromMacros">Kalorien aus Makros berechnen</button></div></div>
@@ -417,7 +464,8 @@ function addResults(p) {
       ${o.status === 'loading' ? '<div class="loading"><div class="spinner"></div>Suche …</div>'
         : o.status === 'done' && o.results.length ? o.results.map((r, i) => row('pickOnline', i, r.brand ? `${r.name} (${r.brand})` : r.name, r.packageGrams ? L.formatGrams(r.packageGrams) : '', r.kcal)).join('')
         : o.status === 'done' ? '<div class="row secondary">Keine Treffer.</div>'
-        : o.status === 'error' ? '<div class="row secondary">Keine Verbindung zu Open Food Facts.</div>'
+        : o.status === 'error' ? `<div class="row secondary">${navigator.onLine === false ? 'Keine Internetverbindung.' : 'Open Food Facts ist gerade überlastet.'}</div>
+          <button class="row accent" data-action="searchOnline">Erneut versuchen</button>`
         : `<button class="row accent" data-action="searchOnline">„${esc(p.search.trim())}“ online suchen</button>`}
       </div></div>`;
   }
@@ -439,13 +487,40 @@ async function searchOnline() {
   refreshAddResults();
   try {
     const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=20&fields=code,product_name,product_name_de,brands,nutriments,product_quantity,quantity`;
-    const res = await fetch(url);
-    const results = L.parseOFFSearch(await res.json());
-    if (page() === p && p.search.trim() === term) p.online = { status: 'done', results };
+    const json = await fetchOFF(url, () => page() === p && p.search.trim() === term);
+    if (!json) return;
+    if (page() === p && p.search.trim() === term) p.online = { status: 'done', results: L.parseOFFSearch(json) };
   } catch {
     if (page() === p) p.online = { status: 'error', results: [] };
   }
   if (page() === p) refreshAddResults();
+}
+
+/**
+ * Open Food Facts ist oft überlastet und antwortet dann mit 503 (ohne CORS-Header, also als
+ * Netzwerkfehler). Darum mehrfach mit wachsender Pause versuchen. 404 → null.
+ * stillWanted() bricht ab, wenn der Nutzer inzwischen etwas anderes sucht.
+ */
+async function fetchOFF(url, stillWanted = () => true) {
+  const delays = [0, 700, 1500, 2500, 4000];
+  let lastError;
+  for (const delay of delays) {
+    if (delay) await new Promise((r) => setTimeout(r, delay));
+    if (!stillWanted()) return null;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      if (res.status === 404) return null;
+      if (res.ok) return await res.json();
+      lastError = new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      lastError = err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError;
 }
 
 function refreshAddResults() {
@@ -558,8 +633,9 @@ async function lookupBarcode(code) {
   p.code = code;
   renderSheet();
   try {
-    const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=code,product_name,product_name_de,brands,nutriments,product_quantity,quantity`);
-    const info = res.status === 404 ? null : L.parseOFFProduct(await res.json(), code);
+    const json = await fetchOFF(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=code,product_name,product_name_de,brands,nutriments,product_quantity,quantity`, () => page() === p);
+    if (page() !== p) return;
+    const info = json ? L.parseOFFProduct(json, code) : null;
     if (page() !== p) return;
     if (!info) {
       return replacePage({ type: 'manual', draft: L.newProduct({ barcode: code }), from: p, hint: 'Produkt nicht in Open Food Facts gefunden. Lege es einmalig an – beim nächsten Scan wird es erkannt.' });
@@ -570,7 +646,7 @@ async function lookupBarcode(code) {
     else replacePage(actionPage(draft, p));
   } catch {
     if (page() !== p) return;
-    replacePage({ type: 'manual', draft: L.newProduct({ barcode: code }), from: p, hint: 'Keine Verbindung zu Open Food Facts. Du kannst das Produkt manuell anlegen.' });
+    replacePage({ type: 'manual', draft: L.newProduct({ barcode: code }), from: p, hint: 'Open Food Facts ist gerade nicht erreichbar. Scanne später noch einmal oder lege das Produkt manuell an.' });
   }
 }
 
@@ -896,6 +972,22 @@ const actions = {
     L.shoppingAddGrams(state, L.findProduct(state, d.id), s.recommendedGrams, 'suggestion');
     save(); render();
   },
+  stepItem: (d) => { L.stepShoppingCount(state, d.id, +d.delta); save(); render(); },
+  copyMeal: (d) => {
+    const clip = L.copyMeal(state, ui.day, d.meal);
+    if (!clip) return;
+    setClipboard(clip);
+    render();
+    toast(`${mealTitle(d.meal)} kopiert`);
+  },
+  pasteMeal: (d) => {
+    if (!ui.clipboard) return;
+    const added = L.pasteMeal(state, ui.clipboard, ui.day, d.meal);
+    save(); render();
+    toast(added.length ? `${added.length} ${added.length === 1 ? 'Eintrag' : 'Einträge'} bei ${mealTitle(d.meal)} eingefügt` : 'Produkte nicht mehr vorhanden');
+  },
+  clearClipboard: () => { setClipboard(null); render(); },
+  setTheme: (d) => { state.settings.theme = d.id; save(); applyTheme(); render(); },
   toggleItem: (d) => { const i = state.shopping.find((x) => x.id === d.id); i.checked = !i.checked; save(); render(); },
   deleteItem: (d) => { state.shopping = state.shopping.filter((x) => x.id !== d.id); save(); render(); },
   checkout: () => {
@@ -980,6 +1072,7 @@ const inputs = {
   },
   goal: (el) => { state.goals[el.dataset.key] = parseNum(el.value); save(); },
   autoAdd: (el) => { state.settings.autoAdd = el.checked; save(); },
+  shopCount: (el) => { L.setShoppingCount(state, el.dataset.id, parseNum(el.value)); save(); render(); },
   importData: async (el) => {
     const file = el.files?.[0];
     if (!file) return;
@@ -998,7 +1091,7 @@ const inputs = {
 };
 
 // Felder, die erst beim Verlassen übernommen werden (sonst springt der Cursor)
-const changeOnly = new Set(['onceDate', 'weekday', 'time', 'importData', 'hasExpiry', 'hasPiece', 'editHasExpiry', 'autoAdd', 'meal']);
+const changeOnly = new Set(['onceDate', 'weekday', 'time', 'importData', 'hasExpiry', 'hasPiece', 'editHasExpiry', 'autoAdd', 'meal', 'shopCount']);
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
@@ -1053,6 +1146,8 @@ function addFreeText() {
 
 async function start() {
   try { foods = await (await fetch('foods.json')).json(); } catch { foods = []; }
+  applyTheme();
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
   computeMonitor();
   render();
   navigator.storage?.persist?.();

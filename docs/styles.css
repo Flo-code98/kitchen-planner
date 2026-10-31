@@ -25,8 +25,9 @@
   color-scheme: light dark;
 }
 
+/* Dunkel: per System (außer „Hell“ gewählt) oder fest per Einstellung */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #000000;
     --card: #1c1c1e;
     --text: #ffffff;
@@ -43,6 +44,24 @@
     --backdrop: rgba(0, 0, 0, 0.5);
   }
 }
+:root[data-theme="dark"] {
+  --bg: #000000;
+  --card: #1c1c1e;
+  --text: #ffffff;
+  --secondary: #98989f;
+  --tertiary: #48484a;
+  --separator: #38383a;
+  --fill: #2c2c2e;
+  --fill-strong: #3a3a3c;
+  --accent: #3cc06f;
+  --accent-soft: rgba(60, 192, 111, 0.16);
+  --glass: rgba(44, 44, 46, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  --backdrop: rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
@@ -303,3 +322,18 @@ button.row:active, .row.tappable:active { background: var(--fill); }
 .row-icon.orange { color: var(--orange); }
 .sheet-header .pill-text { padding: 0 14px; }
 .sheet-backdrop.closing, .sheet.closing { pointer-events: none; }
+
+/* MARK: Mahlzeit kopieren */
+.header-trail { display: flex; align-items: center; gap: 10px; }
+.header-button { color: var(--accent); display: grid; place-items: center; width: 30px; height: 30px; margin: -6px -6px -6px 0; border-radius: 999px; }
+.header-button:active { background: var(--fill); }
+.clip-bar .icon { color: var(--accent); }
+
+/* MARK: Mengenwahl in der Einkaufsliste */
+.stepper { display: flex; align-items: center; background: var(--fill); border-radius: 999px; flex: none; }
+.stepper button { width: 34px; height: 34px; display: grid; place-items: center; color: var(--accent); border-radius: 999px; }
+.stepper button:active { background: var(--fill-strong); }
+.stepper input {
+  width: 42px; border: 0; background: none; outline: none; text-align: center; padding: 0;
+  font-variant-numeric: tabular-nums; font-weight: 600;
+}

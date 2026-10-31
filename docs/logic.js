@@ -27,7 +27,7 @@ export function emptyState() {
     shopping: [],
     goals: { ...DEFAULT_GOALS },
     schedule: { mode: 'none', onceDate: Date.now() + 3 * DAY, weekday: 6, hour: 10, minute: 0 },
-    settings: { autoAdd: false },
+    settings: { autoAdd: false, theme: 'system' },
   };
 }
 
@@ -208,6 +208,23 @@ export function consumedOn(state, day) {
   return entriesOn(state, day).reduce((m, e) => addMacros(m, e), { ...ZERO });
 }
 
+/** Merkt sich alle Einträge einer Mahlzeit, um sie an einem anderen Tag einzufügen. */
+export function copyMeal(state, day, meal) {
+  const start = startOfDay(day);
+  const items = entriesOn(state, day)
+    .filter((e) => e.meal === meal && findProduct(state, e.productId))
+    .map((e) => ({ productId: e.productId, grams: e.grams, offset: e.date - start }));
+  return items.length ? { meal, day: start, items } : null;
+}
+
+/** Trägt kopierte Einträge an einem Tag ein (inkl. Abzug vom Vorrat), Uhrzeit wie im Original. */
+export function pasteMeal(state, clipboard, day, meal) {
+  const start = startOfDay(day);
+  return clipboard.items
+    .filter((i) => findProduct(state, i.productId))
+    .map((i) => logFood(state, i.productId, i.grams, meal, start + i.offset));
+}
+
 // MARK: Verbrauchsanalyse
 
 export const WINDOW_DAYS = 28;
@@ -378,6 +395,37 @@ export function shoppingAddGrams(state, product, grams, source, note = null) {
   const unit = preferredUnit(product);
   const quantity = Math.round(amountFor(product, grams, unit) * 10) / 10;
   return shoppingAdd(state, { name: product.name, productId: product.id, quantity, unit, source, note });
+}
+
+/**
+ * Wie die Menge eines Listeneintrags gezählt wird: Packungen (wenn bekannt), Stück oder Gramm.
+ * factor rechnet die angezeigte Anzahl in item.quantity um.
+ */
+export function shoppingCounter(state, item) {
+  const p = item.productId && findProduct(state, item.productId);
+  if (item.unit === 'piece') return { factor: 1, step: 1, label: 'Stück' };
+  if (p?.packageGrams) return { factor: p.packageGrams, step: 1, label: `× ${formatGrams(p.packageGrams)}` };
+  return { factor: 1, step: 100, label: 'g' };
+}
+
+export function shoppingCount(state, item) {
+  return item.quantity / shoppingCounter(state, item).factor;
+}
+
+export function setShoppingCount(state, itemId, count) {
+  const item = state.shopping.find((i) => i.id === itemId);
+  if (!item) return;
+  item.quantity = Math.max(0, count) * shoppingCounter(state, item).factor;
+}
+
+/** Plus/Minus: rastet auf ganze Schritte ein, nie unter einen Schritt. */
+export function stepShoppingCount(state, itemId, direction) {
+  const item = state.shopping.find((i) => i.id === itemId);
+  if (!item) return;
+  const { step } = shoppingCounter(state, item);
+  const count = shoppingCount(state, item);
+  const next = direction > 0 ? Math.floor(count / step + 1e-6) * step + step : Math.ceil(count / step - 1e-6) * step - step;
+  setShoppingCount(state, itemId, Math.max(step, next));
 }
 
 export function itemGrams(state, item) {
