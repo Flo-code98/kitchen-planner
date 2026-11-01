@@ -1,5 +1,5 @@
 // Offline-Cache für die App-Hülle. Open-Food-Facts-Anfragen gehen immer ins Netz.
-const CACHE = 'kitchenplanner-v2';
+const CACHE = 'kitchenplanner-v3';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'logic.js', 'foods.json', 'manifest.webmanifest', 'icon.svg', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (event) => {

@@ -116,6 +116,7 @@ function dialog(title, message, buttons) {
 const I = {
   chevronLeft: '<path d="M15 5l-7 7 7 7"/>',
   chevronRight: '<path d="M9 5l7 7-7 7"/>',
+  chevronDown: '<path d="M6 9l6 6 6-6"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7"/>',
   plusCircle: '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',
@@ -168,9 +169,6 @@ function topbar(left, right) {
 
 function renderToday() {
   const isToday = ui.day === L.startOfDay(Date.now());
-  const yesterday = ui.day === L.startOfDay(Date.now()) - L.DAY;
-  const title = isToday ? 'Heute' : yesterday ? 'Gestern'
-    : new Date(ui.day).toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' });
   const entries = L.entriesOn(state, ui.day);
   const consumed = entries.reduce((m, e) => L.addMacros(m, e), { ...L.ZERO });
   const g = state.goals;
@@ -187,39 +185,86 @@ function renderToday() {
   return `
     ${topbar(
       `<div class="pill"><button data-action="day" data-delta="-1" aria-label="Vorheriger Tag">${icon('chevronLeft')}</button>
-        <button data-action="day" data-delta="1" aria-label="Nächster Tag" ${isToday ? 'disabled' : ''}>${icon('chevronRight')}</button></div>`,
+        <button data-action="day" data-delta="1" aria-label="Nächster Tag">${icon('chevronRight')}</button></div>`,
       `<div class="pill"><button data-action="add" data-intent="log" data-scan="1" aria-label="Scannen">${icon('barcode')}</button>
         <button data-action="add" data-intent="log" aria-label="Hinzufügen">${icon('plus')}</button></div>`)}
-    <h1 class="large-title">${esc(title)}</h1>
+    <div class="title-row">
+      <label class="date-jump"><h1 class="large-title">${esc(dayTitle(ui.day))}<span class="chev">${icon('chevronDown', 20, 2.4)}</span></h1>
+        <input type="date" value="${isoDate(ui.day)}" data-input="jumpDate" aria-label="Datum wählen"></label>
+      ${isToday ? '' : '<button class="chip" data-action="goToday">Heute</button>'}
+    </div>
+    ${weekStrip()}
     ${banner}${clipboardBar()}
     <div class="section"><div class="card macro-card">${macroRing(consumed, g)}</div></div>
     ${L.MEALS.map((meal) => {
       const list = entries.filter((e) => e.meal === meal.id);
       const kcal = list.reduce((s, e) => s + e.kcal, 0);
       return `<div class="section">
-        <div class="section-header"><span>${meal.title}</span><span class="header-trail">${kcal > 0 ? `${Math.round(kcal)} kcal` : ''}
-          ${list.length ? `<button class="header-button" data-action="copyMeal" data-meal="${meal.id}" aria-label="${meal.title} kopieren">${icon('copy', 18, 1.8)}</button>` : ''}</span></div>
+        <div class="section-header meal-header" ${list.length ? `data-longpress="copyMeal" data-meal="${meal.id}"` : ''}>
+          <span>${meal.title}</span><span>${kcal > 0 ? `${Math.round(kcal)} kcal` : ''}</span></div>
         <div class="card">
-          ${list.map((e) => {
-            const p = L.findProduct(state, e.productId);
-            return `<button class="row" data-action="entry" data-id="${e.id}">
-              <div class="grow"><div class="title">${esc(e.productName)}</div>
-                <div class="sub">${L.formatAmount(e.grams, p?.gramsPerPiece)}</div>
-                ${e.missingGrams > 0.5 ? `<div class="sub orange">${L.formatGrams(e.missingGrams)} nicht aus dem Vorrat</div>` : ''}</div>
-              <div style="text-align:right"><div>${Math.round(e.kcal)} kcal</div>
-                <div class="trail-small">KH ${Math.round(e.carbs)} · F ${Math.round(e.fat)} · P ${Math.round(e.protein)}</div></div>
-            </button>`;
-          }).join('')}
+          ${list.map(entryRow).join('')}
           <button class="row icon-row" data-action="add" data-intent="log" data-meal="${meal.id}">
             <span class="row-icon">${icon('plusCircle', 24, 1.7)}</span><span class="accent">Hinzufügen</span>
           </button>
           ${ui.clipboard ? `<button class="row icon-row" data-action="pasteMeal" data-meal="${meal.id}">
-            <span class="row-icon">${icon('paste', 24, 1.7)}</span><span class="accent grow">${esc(mealTitle(ui.clipboard.meal))} einfügen</span>
+            <span class="row-icon">${icon('paste', 24, 1.7)}</span><span class="accent grow">${esc(clipName(ui.clipboard))} einfügen</span>
             <span class="trail-small">${ui.clipboard.items.length} ${ui.clipboard.items.length === 1 ? 'Eintrag' : 'Einträge'}</span>
           </button>` : ''}
         </div></div>`;
-    }).join('')}`;
+    }).join('')}
+    <div class="section-footer" style="margin-bottom:20px">Tipp: Mahlzeit-Überschrift lange drücken, um die ganze Mahlzeit zu kopieren. Einträge nach links wischen zum Kopieren oder Löschen, antippen zum Ändern.</div>`;
 }
+
+function entryRow(e) {
+  const p = L.findProduct(state, e.productId);
+  return `<div class="swipe">
+    <div class="swipe-actions">
+      <button class="copy" data-action="copyEntry" data-id="${e.id}">${icon('copy', 22, 1.8)}<span>Kopieren</span></button>
+      <button class="del" data-action="deleteEntry" data-id="${e.id}">${icon('trash', 22, 1.8)}<span>Löschen</span></button>
+    </div>
+    <button class="row swipe-row" data-action="entry" data-id="${e.id}">
+      <span class="food-emoji">${productEmoji(p, e.productName)}</span>
+      <div class="grow"><div class="title">${esc(e.productName)}</div>
+        <div class="sub">${L.formatAmount(e.grams, p?.gramsPerPiece)}</div>
+        ${e.missingGrams > 0.5 ? `<div class="sub orange">${L.formatGrams(e.missingGrams)} nicht aus dem Vorrat</div>` : ''}</div>
+      <div style="text-align:right"><div>${Math.round(e.kcal)} kcal</div>
+        <div class="trail-small">KH ${Math.round(e.carbs)} · F ${Math.round(e.fat)} · P ${Math.round(e.protein)}</div></div>
+    </button></div>`;
+}
+
+const productEmoji = (p, fallbackName) => L.foodEmoji(p?.name ?? fallbackName, foods.find((f) => f.name === p?.name)?.category);
+
+function dayTitle(day) {
+  const today = L.startOfDay(Date.now());
+  if (day === today) return 'Heute';
+  if (day === addDays(today, -1)) return 'Gestern';
+  if (day === addDays(today, 1)) return 'Morgen';
+  return new Date(day).toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+/** Woche (Mo–So) des gewählten Tags; Ring = Anteil am Kalorienziel. */
+function weekStrip() {
+  const today = L.startOfDay(Date.now());
+  const monday = addDays(ui.day, -((new Date(ui.day).getDay() + 6) % 7));
+  const r = 15, circ = 2 * Math.PI * r;
+  return `<div class="week">${[0, 1, 2, 3, 4, 5, 6].map((i) => {
+    const day = addDays(monday, i);
+    const kcal = L.consumedOn(state, day).kcal;
+    const progress = state.goals.kcal > 0 ? Math.min(1, kcal / state.goals.kcal) : 0;
+    const over = kcal > state.goals.kcal;
+    return `<button class="week-day ${day === ui.day ? 'on' : ''} ${day === today ? 'today' : ''}" data-action="pickDay" data-day="${day}">
+      <span class="wd">${new Date(day).toLocaleDateString('de-DE', { weekday: 'short' }).replace('.', '')}</span>
+      <span class="ring-small"><svg width="38" height="38" viewBox="0 0 38 38">
+        <circle cx="19" cy="19" r="${r}" fill="none" stroke="var(--fill-strong)" stroke-width="3.5"/>
+        ${progress > 0 ? `<circle cx="19" cy="19" r="${r}" fill="none" stroke="${over ? 'var(--red)' : 'var(--accent)'}" stroke-width="3.5" stroke-linecap="round"
+          stroke-dasharray="${circ}" stroke-dashoffset="${circ * (1 - progress)}" transform="rotate(-90 19 19)"/>` : ''}
+      </svg><b>${new Date(day).getDate()}</b></span></button>`;
+  }).join('')}</div>`;
+}
+
+const addDays = (t, n) => { const d = new Date(t); d.setDate(d.getDate() + n); return L.startOfDay(d.getTime()); };
+const clipName = (c) => (c.label ? `„${c.label}“` : mealTitle(c.meal));
 
 function clipboardBar() {
   const c = ui.clipboard;
@@ -227,7 +272,7 @@ function clipboardBar() {
   const from = c.day === L.startOfDay(Date.now()) ? 'heute'
     : 'vom ' + new Date(c.day).toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' });
   return `<div class="banner clip-bar"><span class="icon accent">${icon('copy', 22, 1.8)}</span>
-    <span class="grow"><b>${esc(mealTitle(c.meal))} ${from} kopiert</b>
+    <span class="grow"><b>${esc(clipName(c))} ${from} kopiert</b>
     <div class="secondary" style="font-size:13px;margin-top:2px">Tag wählen und bei einer Mahlzeit „Einfügen“ tippen</div></span>
     <button class="pill pill-text" data-action="clearClipboard">Fertig</button></div>`;
 }
@@ -295,7 +340,7 @@ function pantryRow(item, product) {
     badge = `<span class="badge ${cls}">${reach < 1 ? '< 1 Tag' : `~${Math.round(reach)} Tage`}</span>`;
   }
   return `<button class="row" data-action="editPantry" data-id="${item.id}">
-    <div class="grow"><div class="title">${esc(L.displayName(product))}</div>
+    <span class="food-emoji">${productEmoji(product)}</span><div class="grow"><div class="title">${esc(L.displayName(product))}</div>
       <div class="sub">${L.formatAmount(item.remainingGrams, product.gramsPerPiece)}${expiry}</div></div>${badge}</button>`;
 }
 
@@ -425,7 +470,7 @@ function popPage() { stopScanner(); sheet.pages.pop(); renderSheet(); }
 function renderSheet(animate = false) {
   const p = page();
   if (!p) return;
-  const views = { add: sheetAdd, scan: sheetScan, action: sheetAction, manual: sheetManual, pantryEdit: sheetPantryEdit, schedule: sheetSchedule, checkout: sheetCheckout };
+  const views = { add: sheetAdd, scan: sheetScan, action: sheetAction, manual: sheetManual, pantryEdit: sheetPantryEdit, schedule: sheetSchedule, checkout: sheetCheckout, entry: sheetEntry };
   const v = views[p.type](p);
   const left = v.left ?? (sheet.pages.length > 1
     ? `<button class="pill" data-action="back" aria-label="Zurück"><span style="width:44px;height:44px;display:grid;place-items:center">${icon('chevronLeft')}</span></button>`
@@ -454,15 +499,15 @@ function addResults(p) {
     .sort((a, b) => (a.stock > 0) !== (b.stock > 0) ? (a.stock > 0 ? -1 : 1) : a.pr.name.localeCompare(b.pr.name));
   const ownNames = new Set(state.products.filter((pr) => !pr.barcode).map((pr) => pr.name));
   const generic = L.searchCatalog(foods, p.search).filter((f) => !ownNames.has(f.name)).slice(0, needle ? 40 : 200);
-  const row = (action, id, name, detail, kcal) => `<button class="row" data-action="${action}" data-id="${esc(id)}">
-    <div class="grow"><div class="title">${esc(name)}</div>${detail ? `<div class="sub">${esc(detail)}</div>` : ''}</div>
+  const row = (action, id, name, detail, kcal, emoji) => `<button class="row" data-action="${action}" data-id="${esc(id)}">
+    <span class="food-emoji">${emoji}</span><div class="grow"><div class="title">${esc(name)}</div>${detail ? `<div class="sub">${esc(detail)}</div>` : ''}</div>
     <span class="trail-small">${Math.round(kcal)} kcal/100 g</span></button>`;
   let online = '';
   if (p.search.trim().length >= 3) {
     const o = p.online;
     online = `<div class="section"><div class="section-header">Online (Open Food Facts)</div><div class="card">
       ${o.status === 'loading' ? '<div class="loading"><div class="spinner"></div>Suche …</div>'
-        : o.status === 'done' && o.results.length ? o.results.map((r, i) => row('pickOnline', i, r.brand ? `${r.name} (${r.brand})` : r.name, r.packageGrams ? L.formatGrams(r.packageGrams) : '', r.kcal)).join('')
+        : o.status === 'done' && o.results.length ? o.results.map((r, i) => row('pickOnline', i, r.brand ? `${r.name} (${r.brand})` : r.name, r.packageGrams ? L.formatGrams(r.packageGrams) : '', r.kcal, L.foodEmoji(r.name))).join('')
         : o.status === 'done' ? '<div class="row secondary">Keine Treffer.</div>'
         : o.status === 'error' ? `<div class="row secondary">${navigator.onLine === false ? 'Keine Internetverbindung.' : 'Open Food Facts ist gerade überlastet.'}</div>
           <button class="row accent" data-action="searchOnline">Erneut versuchen</button>`
@@ -474,9 +519,9 @@ function addResults(p) {
       <button class="row icon-row" data-action="newManual"><span class="row-icon">${icon('pencil', 24, 1.7)}</span><span class="accent">Eigenes Lebensmittel anlegen</span></button>
     </div></div>`}
     ${mine.length ? `<div class="section"><div class="section-header">Meine Lebensmittel</div><div class="card">
-      ${mine.map(({ pr, stock }) => row('pickProduct', pr.id, L.displayName(pr), stock > 0 ? `Im Vorrat: ${L.formatAmount(stock, pr.gramsPerPiece)}` : '', pr.kcal)).join('')}</div></div>` : ''}
+      ${mine.map(({ pr, stock }) => row('pickProduct', pr.id, L.displayName(pr), stock > 0 ? `Im Vorrat: ${L.formatAmount(stock, pr.gramsPerPiece)}` : '', pr.kcal, productEmoji(pr))).join('')}</div></div>` : ''}
     ${generic.length ? `<div class="section"><div class="section-header">Ohne Barcode (lose Ware)</div><div class="card">
-      ${generic.map((f) => row('pickGeneric', f.name, f.name, f.piece ? `1 Stück ≈ ${f.piece} g` : f.category, f.kcal)).join('')}</div></div>` : ''}
+      ${generic.map((f) => row('pickGeneric', f.name, f.name, f.piece ? `1 Stück ≈ ${f.piece} g` : f.category, f.kcal, L.foodEmoji(f.name, f.category))).join('')}</div></div>` : ''}
     ${online}`;
 }
 
@@ -739,18 +784,62 @@ function refreshActionDerived() {
   document.querySelectorAll('[data-action="confirmAction"]').forEach((b) => { b.disabled = !(p.amount > 0 && pr.name); });
 }
 
+/** Auf „Heute“ an einem anderen Tag eingetragen → dieser Tag, gleiche Uhrzeit wie jetzt. */
+function logDate() {
+  const now = Date.now();
+  return ui.tab === 'today' ? ui.day + (now - L.startOfDay(now)) : now;
+}
+
 function confirmAction() {
   const p = page();
   const product = L.upsertProduct(state, p.draft);
   const grams = L.gramsFor(product, p.amount, p.unit);
   if (p.intent === 'pantry') L.addToPantry(state, product.id, grams, p.location, p.hasExpiry ? p.expiry : null);
-  else if (p.intent === 'log') L.logFood(state, product.id, grams, p.meal);
+  else if (p.intent === 'log') L.logFood(state, product.id, grams, p.meal, logDate());
   else L.shoppingAdd(state, { name: product.name, productId: product.id, quantity: p.amount, unit: p.unit });
   save();
   navigator.vibrate?.(20);
   toast({ pantry: 'Im Vorrat', log: 'Eingetragen', shopping: 'Auf der Einkaufsliste' }[p.intent]);
   if (sheet.pages[0].type === 'pantryEdit' && sheet.pages.length > 1) return closeSheet();
   closeSheet();
+}
+
+// Eingetragenes Essen ändern
+
+const entryProduct = (p) => L.findProduct(state, state.log.find((e) => e.id === p.entryId)?.productId);
+
+function sheetEntry(p) {
+  const e = state.log.find((x) => x.id === p.entryId);
+  const pr = entryProduct(p);
+  if (!e || !pr) return { title: 'Eintrag', body: '<p class="secondary">Eintrag nicht gefunden.</p>' };
+  const quick = pr.gramsPerPiece ? [['1 Stück', 1, 'piece'], ['2 Stück', 2, 'piece'], ['3 Stück', 3, 'piece']]
+    : [['50 g', 50, 'gram'], ['100 g', 100, 'gram'], ['150 g', 150, 'gram'], ['200 g', 200, 'gram']];
+  return {
+    title: 'Eintrag ändern',
+    right: `<button class="pill pill-text" data-action="saveEntry" ${p.amount > 0 ? '' : 'disabled'}>Sichern</button>`,
+    body: `<div class="section"><div class="card"><div class="row icon-row">
+        <span class="food-emoji">${productEmoji(pr)}</span>
+        <div class="grow"><b style="font-size:18px">${esc(pr.name)}</b>
+        <div class="sub">${dayTitle(L.startOfDay(e.date))} · pro 100 g: ${Math.round(pr.kcal)} kcal</div></div></div></div></div>
+      <div class="section"><div class="section-header">Menge</div><div class="card">
+        <div class="row"><input class="amount-field" inputmode="decimal" value="${numValue(p.amount)}" data-input="entryAmount" aria-label="Menge">
+          ${pr.gramsPerPiece ? `<div class="segmented small">${['gram', 'piece'].map((u) => `<button class="${p.unit === u ? 'on' : ''}" data-action="entryUnit" data-id="${u}">${u === 'piece' ? 'Stück' : 'g'}</button>`).join('')}</div>`
+            : '<span class="secondary">g</span>'}</div>
+        <div class="row"><div class="chips">${quick.map(([label, amount, unit]) => `<button class="chip" data-action="entryQuick" data-amount="${amount}" data-unit="${unit}">${label}</button>`).join('')}</div></div>
+      </div></div>
+      <div class="section"><div class="card">
+        <label class="row"><span class="grow">Mahlzeit</span><select class="select" data-input="entryMeal">
+          ${L.MEALS.map((m) => `<option value="${m.id}" ${p.meal === m.id ? 'selected' : ''}>${m.title}</option>`).join('')}</select></label>
+      </div></div>
+      <div class="section"><div class="section-header">Nährwerte dieser Menge</div><div class="card" id="entry-macros">${macroStats(L.macrosFor(pr, L.gramsFor(pr, p.amount, p.unit)))}</div></div>
+      <div class="section"><div class="card">
+        <button class="big-button" data-action="saveEntry" ${p.amount > 0 ? '' : 'disabled'}>Sichern</button>
+      </div></div>
+      <div class="section"><div class="card">
+        <button class="row accent" data-action="copyEntry" data-id="${e.id}">Kopieren (an anderem Tag einfügen)</button>
+        <button class="row danger" data-action="deleteEntry" data-id="${e.id}">Eintrag löschen</button>
+      </div><div class="section-footer">Beim Ändern oder Löschen wird der Vorrat entsprechend angepasst.</div></div>`,
+  };
 }
 
 // Eigenes Lebensmittel / Nährwerte bearbeiten
@@ -863,7 +952,9 @@ function defaultLocation(item) {
 
 const actions = {
   tab: (d) => { ui.tab = d.id; render(); window.scrollTo(0, 0); },
-  day: (d) => { ui.day = L.startOfDay(ui.day + +d.delta * L.DAY + L.DAY / 2); render(); },
+  day: (d) => { ui.day = addDays(ui.day, +d.delta); render(); },
+  pickDay: (d) => { ui.day = +d.day; render(); },
+  goToday: () => { ui.day = L.startOfDay(Date.now()); render(); },
   add: (d) => {
     const p = { type: 'add', intent: d.intent, meal: d.meal, search: '', online: { status: 'idle', results: [] } };
     openSheet(p);
@@ -907,11 +998,42 @@ const actions = {
     if (p.editOnly) return popPage();
     replacePage(actionPage(p.draft, p.from));
   },
-  entry: async (d) => {
+  entry: (d) => {
     const e = state.log.find((x) => x.id === d.id);
-    const choice = await dialog(e.productName, 'Eintrag löschen? Die Menge wird zurück in den Vorrat gebucht.', [
-      { label: 'Abbrechen', value: null }, { label: 'Löschen', value: 'delete', destructive: true }]);
-    if (choice === 'delete') { L.deleteEntry(state, d.id); save(); render(); }
+    const pr = L.findProduct(state, e?.productId);
+    if (!pr) return;
+    const unit = L.preferredUnit(pr);
+    openSheet({ type: 'entry', entryId: e.id, unit, amount: Math.round(L.amountFor(pr, e.grams, unit) * 10) / 10, meal: e.meal });
+  },
+  entryUnit: (d) => {
+    const p = page();
+    const pr = entryProduct(p);
+    const grams = L.gramsFor(pr, p.amount, p.unit);
+    p.unit = d.id;
+    p.amount = Math.round(L.amountFor(pr, grams, p.unit) * 10) / 10;
+    renderSheet();
+  },
+  entryQuick: (d) => { const p = page(); p.amount = +d.amount; p.unit = d.unit; renderSheet(); },
+  saveEntry: () => {
+    const p = page();
+    if (!(p.amount > 0)) return;
+    L.updateEntry(state, p.entryId, L.gramsFor(entryProduct(p), p.amount, p.unit), p.meal);
+    save();
+    toast('Gespeichert');
+    closeSheet();
+  },
+  copyEntry: (d) => {
+    const clip = L.copyEntry(state, d.id);
+    if (!clip) return;
+    setClipboard(clip);
+    if (sheet) closeSheet(); else render();
+    toast(`${clip.label} kopiert`);
+  },
+  deleteEntry: (d) => {
+    L.deleteEntry(state, d.id);
+    save();
+    if (sheet) closeSheet(); else render();
+    toast('Gelöscht – Menge zurück im Vorrat');
   },
   editPantry: (d) => {
     const item = state.pantry.find((i) => i.id === d.id);
@@ -1033,6 +1155,16 @@ const inputs = {
     refreshAddResults();
   },
   newItem: (el) => { ui.newItem = el.value; },
+  jumpDate: (el) => { if (el.value) { ui.day = L.startOfDay(new Date(el.value + 'T12:00').getTime()); render(); } },
+  entryAmount: (el) => {
+    const p = page();
+    p.amount = parseNum(el.value);
+    const pr = entryProduct(p);
+    const m = $('#entry-macros');
+    if (m && pr) m.innerHTML = macroStats(L.macrosFor(pr, L.gramsFor(pr, p.amount, p.unit)));
+    document.querySelectorAll('[data-action="saveEntry"]').forEach((b) => { b.disabled = !(p.amount > 0); });
+  },
+  entryMeal: (el) => { page().meal = el.value; },
   manualCode: (el) => {
     page().code = el.value.replace(/\D/g, '');
     const b = $('#code-submit');
@@ -1091,9 +1223,93 @@ const inputs = {
 };
 
 // Felder, die erst beim Verlassen übernommen werden (sonst springt der Cursor)
-const changeOnly = new Set(['onceDate', 'weekday', 'time', 'importData', 'hasExpiry', 'hasPiece', 'editHasExpiry', 'autoAdd', 'meal', 'shopCount']);
+const changeOnly = new Set(['onceDate', 'weekday', 'time', 'importData', 'hasExpiry', 'hasPiece', 'editHasExpiry', 'autoAdd', 'meal', 'shopCount', 'jumpDate', 'entryMeal']);
+
+// MARK: Wischen & langes Drücken
+
+const SWIPE_WIDTH = 160;
+let swipe = null;
+let press = null;
+let suppressClick = false;
+
+function setSwipe(row, offset, animate = true) {
+  const wrap = row.parentElement;
+  clearTimeout(wrap.hideTimer);
+  // Aktionen nur zeigen, solange die Zeile verschoben ist (sonst schimmert Rot am Kartenrand durch).
+  if (offset) wrap.classList.add('active');
+  else wrap.hideTimer = setTimeout(() => wrap.classList.remove('active'), animate ? 260 : 0);
+  row.style.transition = animate ? '' : 'none';
+  row.style.transform = offset ? `translateX(${offset}px)` : '';
+  row.classList.toggle('open', offset <= -SWIPE_WIDTH);
+}
+
+function cancelPress() {
+  if (!press) return;
+  clearTimeout(press.timer);
+  press.el.classList.remove('pressing');
+  press = null;
+}
+
+document.addEventListener('pointerdown', (e) => {
+  suppressClick = false;
+  const row = e.target.closest('.swipe-row');
+  document.querySelectorAll('.swipe-row.open').forEach((r) => {
+    if (r !== row) { setSwipe(r, 0); if (!e.target.closest('.swipe-actions')) suppressClick = true; }
+  });
+  if (row) {
+    const wasOpen = row.classList.contains('open');
+    swipe = { row, x: e.clientX, y: e.clientY, base: wasOpen ? -SWIPE_WIDTH : 0, mode: null, offset: 0, wasOpen };
+  }
+
+  const target = e.target.closest('[data-longpress]');
+  if (target) {
+    target.classList.add('pressing');
+    press = {
+      el: target, x: e.clientX, y: e.clientY,
+      timer: setTimeout(() => {
+        const el = press?.el;
+        cancelPress();
+        if (!el) return;
+        suppressClick = true;
+        navigator.vibrate?.(30);
+        actions[el.dataset.longpress]?.(el.dataset);
+      }, 500),
+    };
+  }
+});
+
+document.addEventListener('pointermove', (e) => {
+  if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) cancelPress();
+  if (!swipe) return;
+  const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+  if (!swipe.mode) {
+    if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) swipe.mode = 'h';
+    else if (Math.abs(dy) > 8) { swipe = null; return; }
+  }
+  if (swipe.mode === 'h') {
+    swipe.offset = Math.max(-SWIPE_WIDTH - 40, Math.min(0, swipe.base + dx));
+    setSwipe(swipe.row, swipe.offset, false);
+  }
+});
+
+function endPointer() {
+  cancelPress();
+  if (swipe?.mode === 'h') {
+    setSwipe(swipe.row, swipe.offset < -SWIPE_WIDTH / 2 ? -SWIPE_WIDTH : 0);
+    suppressClick = true;
+  } else if (swipe?.wasOpen) {
+    // Tippen auf eine geöffnete Zeile schließt sie nur.
+    setSwipe(swipe.row, 0);
+    suppressClick = true;
+  }
+  swipe = null;
+}
+document.addEventListener('pointerup', endPointer);
+document.addEventListener('pointercancel', endPointer);
+document.addEventListener('contextmenu', (e) => { if (e.target.closest('[data-longpress]')) e.preventDefault(); });
 
 document.addEventListener('click', (e) => {
+  if (suppressClick) { suppressClick = false; e.preventDefault(); return; }
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
   e.preventDefault();

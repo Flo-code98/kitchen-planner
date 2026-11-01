@@ -324,9 +324,6 @@ button.row:active, .row.tappable:active { background: var(--fill); }
 .sheet-backdrop.closing, .sheet.closing { pointer-events: none; }
 
 /* MARK: Mahlzeit kopieren */
-.header-trail { display: flex; align-items: center; gap: 10px; }
-.header-button { color: var(--accent); display: grid; place-items: center; width: 30px; height: 30px; margin: -6px -6px -6px 0; border-radius: 999px; }
-.header-button:active { background: var(--fill); }
 .clip-bar .icon { color: var(--accent); }
 
 /* MARK: Mengenwahl in der Einkaufsliste */
@@ -337,3 +334,47 @@ button.row:active, .row.tappable:active { background: var(--fill); }
   width: 42px; border: 0; background: none; outline: none; text-align: center; padding: 0;
   font-variant-numeric: tabular-nums; font-weight: 600;
 }
+
+/* MARK: Datum & Woche */
+.title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.date-jump { position: relative; display: inline-block; cursor: pointer; }
+.date-jump .large-title { display: flex; align-items: center; gap: 6px; }
+.date-jump .chev { color: var(--accent); display: grid; place-items: center; }
+.date-jump input {
+  position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; padding: 0; margin: 0;
+  -webkit-appearance: none; appearance: none; cursor: pointer;
+}
+.week { display: flex; justify-content: space-between; gap: 2px; margin: -4px 0 18px; }
+.week-day {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 7px 0 8px;
+  border-radius: 18px; color: var(--secondary); font-size: 12px;
+}
+.week-day.on { background: var(--card); color: var(--text); box-shadow: var(--shadow); }
+.week-day.today .wd { color: var(--accent); font-weight: 700; }
+.week-day .ring-small { position: relative; width: 38px; height: 38px; display: grid; place-items: center; }
+.week-day .ring-small svg { position: absolute; inset: 0; }
+.week-day .ring-small b { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* MARK: Lebensmittel-Symbole */
+.food-emoji {
+  font-size: 26px; line-height: 1; width: 34px; flex: none; text-align: center;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+}
+
+/* MARK: Wischen & langes Drücken */
+.swipe { position: relative; overflow: hidden; }
+.swipe + .swipe::before, .swipe + .row::before {
+  content: ""; position: absolute; top: 0; left: 66px; right: 20px; height: 1px; background: var(--separator); z-index: 2;
+}
+.swipe-row { background: var(--card); transition: transform 0.25s ease; touch-action: pan-y; z-index: 1; }
+.swipe-actions { position: absolute; top: 0; right: 0; bottom: 0; display: flex; visibility: hidden; }
+.swipe.active .swipe-actions { visibility: visible; }
+.swipe-actions button {
+  width: 80px; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; font-size: 12px; font-weight: 600;
+}
+.swipe-actions .copy { background: var(--blue); }
+.swipe-actions .del { background: var(--red); }
+.meal-header { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; transition: transform 0.15s, opacity 0.15s; }
+.meal-header[data-longpress] { cursor: pointer; }
+.meal-header.pressing { transform: scale(0.97); opacity: 0.6; }

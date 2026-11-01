@@ -9,11 +9,13 @@ export const LOCATIONS = [
   { id: 'freezer', title: 'Tiefkühler', icon: 'snow' },
 ];
 
+// 'snack' war früher die einzige Zwischenmahlzeit – bleibt als Snack 2, damit alte Einträge passen.
 export const MEALS = [
   { id: 'breakfast', title: 'Frühstück' },
+  { id: 'snack1', title: 'Snack 1' },
   { id: 'lunch', title: 'Mittagessen' },
+  { id: 'snack', title: 'Snack 2' },
   { id: 'dinner', title: 'Abendessen' },
-  { id: 'snack', title: 'Snacks' },
 ];
 
 export const DEFAULT_GOALS = { kcal: 2200, carbs: 250, fat: 70, protein: 140 };
@@ -76,8 +78,9 @@ export function daysBetween(a, b) {
 
 export function suggestedMeal(t = Date.now()) {
   const h = new Date(t).getHours();
-  if (h >= 4 && h < 11) return 'breakfast';
-  if (h >= 11 && h < 15) return 'lunch';
+  if (h >= 4 && h < 10) return 'breakfast';
+  if (h >= 10 && h < 12) return 'snack1';
+  if (h >= 12 && h < 15) return 'lunch';
   if (h >= 17 && h < 22) return 'dinner';
   return 'snack';
 }
@@ -206,6 +209,23 @@ export function entriesOn(state, day) {
 
 export function consumedOn(state, day) {
   return entriesOn(state, day).reduce((m, e) => addMacros(m, e), { ...ZERO });
+}
+
+/** Ändert Menge/Mahlzeit: alten Abzug zurückbuchen, neu eintragen (gleiches Datum). */
+export function updateEntry(state, entryId, grams, meal) {
+  const old = state.log.find((e) => e.id === entryId);
+  if (!old || !findProduct(state, old.productId)) return null;
+  const { productId, date } = old;
+  deleteEntry(state, entryId);
+  return logFood(state, productId, grams, meal, date);
+}
+
+/** Einzelnen Eintrag in die Zwischenablage (gleiches Format wie eine ganze Mahlzeit). */
+export function copyEntry(state, entryId) {
+  const e = state.log.find((x) => x.id === entryId);
+  if (!e || !findProduct(state, e.productId)) return null;
+  const start = startOfDay(e.date);
+  return { meal: e.meal, day: start, label: e.productName, items: [{ productId: e.productId, grams: e.grams, offset: e.date - start }] };
 }
 
 /** Merkt sich alle Einträge einer Mahlzeit, um sie an einem anderen Tag einzufügen. */
@@ -523,4 +543,46 @@ export function parseOFFProduct(json, barcode) {
 
 export function parseOFFSearch(json) {
   return (json.products || []).map((p) => offProductInfo(p, p.code)).filter(Boolean);
+}
+
+// MARK: Symbole
+
+// Reihenfolge zählt: Spezielles vor Allgemeinem (Erdnussbutter → 🥜, nicht 🧈).
+const EMOJI_RULES = [
+  [/saft|smoothie/, '🧃'], [/kaffee|espresso|cappuccino/, '☕'], [/\btee\b|eistee/, '🍵'],
+  [/\bbier\b/, '🍺'], [/\bwein\b|sekt/, '🍷'], [/\bcola\b|limo|fanta|sprite|energy/, '🥤'],
+  [/schoko|nutella|kakao/, '🍫'], [/keks|cookie/, '🍪'], [/kuchen|torte|muffin/, '🍰'], [/gummi|bonbon|\szucker/, '🍬'],
+  [/erdnuss|nuss|nüsse|mandel|cashew|pistazie|haselnuss/, '🥜'], [/kokos/, '🥥'],
+  [/joghurt|skyr|quark|milch|drink|kefir|sahne|pudding/, '🥛'],
+  [/käse|gouda|emmentaler|mozzarella|feta|parmesan|tilsiter|cheddar|camembert|brie|edamer/, '🧀'],
+  [/butter|margarine/, '🧈'], [/[\s(,](ei|eier)[\s(,)]/, '🥚'],
+  [/fischstäbchen|lachs|kabeljau|thunfisch|fisch|forelle|hering|seelachs|makrele/, '🐟'], [/garnele|shrimp|scampi/, '🦐'],
+  [/hähnchen|huhn|hühn|pute|chicken|geflügel|nugget/, '🍗'],
+  [/bratwurst|würstchen|wiener|hot ?dog|frikadelle|currywurst/, '🌭'], [/schinken|salami|speck|bacon|aufschnitt|wurst/, '🥓'],
+  [/hackfleisch|hack\b|rind|steak|schwein|schnitzel|gulasch|lamm|fleisch|burger/, '🥩'],
+  [/tofu|tempeh|seitan|veggie|vegan/, '🌱'],
+  [/banane/, '🍌'], [/apfel|äpfel/, '🍎'], [/birne/, '🍐'], [/orange|mandarine|clementine/, '🍊'], [/zitrone|limette/, '🍋'],
+  [/kiwi/, '🥝'], [/erdbeer/, '🍓'], [/heidelbeer|blaubeer|brombeer|himbeer|johannisbeer|beeren/, '🫐'], [/traube/, '🍇'],
+  [/ananas/, '🍍'], [/mango/, '🥭'], [/melone/, '🍉'], [/pfirsich|nektarine|aprikose|pflaume/, '🍑'], [/kirsch/, '🍒'],
+  [/avocado/, '🥑'], [/tomate|passata|ketchup/, '🍅'], [/gurke|zucchini/, '🥒'], [/paprika|chili/, '🫑'],
+  [/karotte|möhre/, '🥕'], [/knoblauch/, '🧄'], [/zwiebel|lauch/, '🧅'], [/süßkartoffel/, '🍠'], [/pommes/, '🍟'],
+  [/kartoffel|püree|chips/, '🥔'], [/brokkoli|blumenkohl/, '🥦'], [/aubergine/, '🍆'], [/champignon|pilz/, '🍄'],
+  [/salat|spinat|rucola|kohl/, '🥬'], [/mais/, '🌽'], [/bohne|linse|kichererbse|hummus/, '🫘'], [/erbse/, '🫛'], [/kürbis/, '🎃'],
+  [/pizza/, '🍕'], [/wrap|tortilla|burrito/, '🌯'], [/sushi/, '🍣'], [/suppe|eintopf/, '🍲'],
+  [/nudel|pasta|spaghetti|penne|lasagne|maultasche/, '🍝'], [/reis|risotto|couscous|quinoa|bulgur/, '🍚'],
+  [/müsli|hafer|flocken|granola|porridge|cornflakes/, '🥣'], [/waffel/, '🧇'], [/pfannkuchen|pancake/, '🥞'],
+  [/brezel/, '🥨'], [/croissant/, '🥐'], [/brötchen|semmel|baguette/, '🥖'], [/brot|toast|knäcke/, '🍞'],
+  [/öl\b|olive/, '🫒'], [/honig/, '🍯'], [/salz|pfeffer|gewürz/, '🧂'], [/soße|sauce|dose|mark\b/, '🥫'], [/mehl/, '🌾'],
+  [/wasser|sprudel/, '💧'],
+];
+const CATEGORY_EMOJI = {
+  'Obst': '🍎', 'Gemüse': '🥕', 'Fleisch & Fisch': '🥩', 'Eier & Milch': '🥛', 'Käse': '🧀',
+  'Getreide & Beilagen': '🍚', 'Brot & Backwaren': '🍞', 'Öle & Würzen': '🧂', 'Nüsse & Snacks': '🥜',
+  'Vegetarisch': '🌱', 'Getränke': '🥤',
+};
+
+export function foodEmoji(name, category = null) {
+  const n = ` ${String(name || '').toLowerCase()} `; // Ränder, damit „Ei“ als ganzes Wort erkannt wird
+  for (const [re, emoji] of EMOJI_RULES) if (re.test(n)) return emoji;
+  return CATEGORY_EMOJI[category] ?? '🍽️';
 }
